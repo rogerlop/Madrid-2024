@@ -62,7 +62,18 @@ First, for `ln_agriculture`, we will manually calculate the means and
 form the difference-in-differences.
 
 ```{r}
+m_d1_y1960 <- df %>% filter(year == 1960 & tva == 1) %>% pull(ln_agriculture) %>% mean()
+df |> 
+group_by(tva, year) |>
+summarise(mean = mean(ln_agriculture)) |> 
+  pivot_wider(names_from = year, values_from = mean) |>
+  mutate(diff_60_40 = `1960` - `1940`) -> means 
 
+dd <- means |> 
+  select(tva, diff_60_40) |>
+  spread(tva, diff_60_40) |>
+  mutate(diff = `1` - `0`) |>
+  pull(diff)
 ```
 
 Second, run the “classic” version using an indicator for treatment,
@@ -71,14 +82,43 @@ of the two. I recommend the package `fixest` for regression analysis.
 I’ll be using it in the solutions.
 
 ```{r}
+df_2by2 <- df |> 
+  filter(year %in% c(1940, 1960))
 
+did_2by2 <- df_2by2 |> 
+  lm(formula = ln_agriculture ~ tva + post + tva:post) |> 
+  summary() 
+
+did_2by2
 ```
+
+Equivalently, using `feols`
+
+
+```{r}
+did_2by2_feols_fe <- df_2by2 |> 
+  feols(c(ln_agriculture, ln_manufacturing) ~ 
+          i(tva * post) | county_code + year,
+        cluster = ~ county_code) |> 
+  summary()
+
+did_2by2_feols_fe
+```
+
+
+
 
 Second, we will see in the 2x2 DID case, using county and time fixed
 effects is equivalent:
 
 ```{r}
+did_2by2_feols_fe <- df_2by2 |> 
+  feols(c(ln_agriculture, ln_manufacturing) ~ 
+          i(tva * post) | county_code + year,
+        cluster = ~ county_code) |> 
+  summary()
 
+did_2by2_feols_fe
 ```
 
 ## Question 2
@@ -111,8 +151,26 @@ treatment status. Estimate the TWFE model with these dummy variables.
 
 ```{r}
 
+es_agriculture <- df |> 
+  mutate(rel_year= ifelse(tva ==0, 1900, year)) |> 
+  feols(ln_agriculture ~ 
+          i(rel_year, ref = c(1940, 1900)) | county_code + year,
+        cluster = ~ county_code)
+
+iplot(es_agriculture)
 ```
 
+
+```{r}
+
+es_manufacturing <- df |> 
+  mutate(rel_year= ifelse(tva ==0, 1940, year)) |> 
+  feols(ln_manufacturing ~ 
+          i(rel_year, ref = c(1940)) | county_code + year,
+        cluster = ~ county_code)
+
+iplot(es_manufacturing)
+```
 
 ## Question 4
 
@@ -122,7 +180,17 @@ the post-period. Let’s show this visually by extending a linear
 regression through the pre-period estimates.
 
 ```{r}
-
+broom::tidy(es_manufacturing) |> 
+  mutate(rel_year = as.numeric(str_replace(term, 'rel_year::', ''))) |>
+  bind_rows(tibble(rel_year = 1940, estimate = 0)) |>
+  ggplot(aes(x = rel_year, y = estimate)) +
+    geom_errorbar(aes(ymin = estimate - 1.96*std.error, ymax = estimate + 1.96*std.error)) +
+    geom_point() +
+  theme_bw()+
+  geom_abline(intercept = coef(pre_trend_line[1]),
+              slope = coef(pre_trend_line[2]),
+              color = 'red')
+           
 ```
 
 
